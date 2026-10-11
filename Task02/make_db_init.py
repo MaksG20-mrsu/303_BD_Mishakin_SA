@@ -1,131 +1,119 @@
 import os
 import csv
 import sqlite3
+import re
 
-DB_NAME = 'movies_rating.db'
-SQL_SCRIPT_NAME = 'db_init.sql'
-DATA_DIR = 'dataset'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUT_FILE = os.path.join(BASE_DIR, "db_init.sql")
+
+def num(value):
+    return "NULL" if value is None or value == "" else str(value)
+
+def path(name):
+    return os.path.join(BASE_DIR, name)
+
+def q(value):
+    if value is None or value == "":
+        return "NULL"
+    return "'" + str(value).replace("'", "''") + "'"
 
 def escape_sql(value):
-    """Экранирует одинарные кавычки для безопасной вставки в SQL."""
+
     if value is None:
         return 'NULL'
     return str(value).replace("'", "''")
 
-def generate_sql_script():
-    """Генерирует SQL-скрипт db_init.sql."""
-    print(f"Генерация {SQL_SCRIPT_NAME}...")
-    
-    with open(SQL_SCRIPT_NAME, 'w', encoding='utf-8') as f:
-        f.write("DROP TABLE IF EXISTS movies;\n")
-        f.write("DROP TABLE IF EXISTS ratings;\n")
-        f.write("DROP TABLE IF EXISTS tags;\n")
-        f.write("DROP TABLE IF EXISTS users;\n\n")
+def main():
+    lines = []
+    w = lines.append
+    w("PRAGMA foreign_keys = OFF;")
+    w("DROP TABLE IF EXISTS movies;")
+    w("DROP TABLE IF EXISTS ratings;")
+    w("DROP TABLE IF EXISTS tags;")
+    w("DROP TABLE IF EXISTS users;")
+    w("")
+    w("CREATE TABLE movies (")
+    w("    id INTEGER PRIMARY KEY,")
+    w("    title VARCHAR(160) NOT NULL,")
+    w("    year INTEGER,")
+    w("    genres VARCHAR(80)")
+    w(");")
+    w("CREATE TABLE ratings (")
+    w("    id INTEGER PRIMARY KEY AUTOINCREMENT,")
+    w("    user_id INTEGER NOT NULL,")
+    w("    movie_id INTEGER NOT NULL,")
+    w("    rating REAL NOT NULL,")
+    w("    timestamp INTEGER NOT NULL")
+    w(");")
+    w("CREATE TABLE tags (")
+    w("    id INTEGER PRIMARY KEY AUTOINCREMENT,")
+    w("    user_id INTEGER NOT NULL,")
+    w("    movie_id INTEGER NOT NULL,")
+    w("    tag VARCHAR(100) NOT NULL,")
+    w("    timestamp INTEGER NOT NULL")
+    w(");")
+    w("CREATE TABLE users (")
+    w("    id INTEGER PRIMARY KEY,")
+    w("    name VARCHAR(50) NOT NULL,")
+    w("    email VARCHAR(50),")
+    w("    gender VARCHAR(10),")
+    w("    register_date TEXT,")
+    w("    occupation VARCHAR(20)")
+    w(");")
+    w("")
+    w("BEGIN TRANSACTION;")
 
-        f.write("""CREATE TABLE movies (
-    id INTEGER PRIMARY KEY,
-    title TEXT NOT NULL,
-    year INTEGER,
-    genres TEXT
-);\n\n""")
+    with open(path("movies.csv"), encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        next(reader)  # заголовок
+        for row in reader:
+            if not row:
+                continue
+            movie_id, title, genres = row[0], row[1].strip(), row[2]
+            m = re.search(r"\((\d{4})\)\s*$", title)
+            year = m.group(1) if m else None
+            if m:
+                title = title[:m.start()].strip()
+            w("INSERT INTO movies (id, title, year, genres) VALUES (%s, %s, %s, %s);"
+              % (movie_id, q(title), num(year), q(genres)))
 
-        f.write("""CREATE TABLE ratings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    movie_id INTEGER NOT NULL,
-    rating REAL NOT NULL,
-    timestamp INTEGER NOT NULL
-);\n\n""")
 
-        f.write("""CREATE TABLE tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    movie_id INTEGER NOT NULL,
-    tag TEXT,
-    timestamp INTEGER NOT NULL
-);\n\n""")
+    with open(path("ratings.csv"), encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            if not row:
+                continue
+            w("INSERT INTO ratings (user_id, movie_id, rating, timestamp) VALUES (%s, %s, %s, %s);"
+              % (row[0], row[1], row[2], row[3]))
 
-        f.write("""CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT,
-    email TEXT,
-    gender TEXT,
-    register_date TEXT,
-    occupation TEXT
-);\n\n""")
 
-        movies_path = os.path.join(DATA_DIR, 'movies.csv')
-        if os.path.exists(movies_path):
-            with open(movies_path, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    movie_id = row.get('movieId') or row.get('id')
-                    title = row.get('title', '')
-                    genres = row.get('genres', '')
-                    year = 'NULL'
-                    if '(' in title and ')' in title:
-                        try:
-                            year_str = title[title.rfind('(')+1:title.rfind(')')]
-                            if year_str.isdigit():
-                                year = year_str
-                        except:
-                            pass
-                    f.write(f"INSERT INTO movies (id, title, year, genres) VALUES ({movie_id}, '{escape_sql(title)}', {year}, '{escape_sql(genres)}');\n")
+    with open(path("tags.csv"), encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            if not row:
+                continue
+            w("INSERT INTO tags (user_id, movie_id, tag, timestamp) VALUES (%s, %s, %s, %s);"
+              % (row[0], row[1], q(row[2]), row[3]))
 
-        ratings_path = os.path.join(DATA_DIR, 'ratings.csv')
-        if os.path.exists(ratings_path):
-            with open(ratings_path, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    user_id = row.get('userId')
-                    movie_id = row.get('movieId')
-                    rating = row.get('rating')
-                    timestamp = row.get('timestamp')
-                    f.write(f"INSERT INTO ratings (user_id, movie_id, rating, timestamp) VALUES ({user_id}, {movie_id}, {rating}, {timestamp});\n")
 
-        tags_path = os.path.join(DATA_DIR, 'tags.csv')
-        if os.path.exists(tags_path):
-            with open(tags_path, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    user_id = row.get('userId')
-                    movie_id = row.get('movieId')
-                    tag = row.get('tag', '')
-                    timestamp = row.get('timestamp')
-                    f.write(f"INSERT INTO tags (user_id, movie_id, tag, timestamp) VALUES ({user_id}, {movie_id}, '{escape_sql(tag)}', {timestamp});\n")
+    with open(path("users.txt"), encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            p = line.split("|")
+            w("INSERT INTO users (id, name, email, gender, register_date, occupation) "
+              "VALUES (%s, %s, %s, %s, %s, %s);"
+              % (p[0], q(p[1]), q(p[2]), q(p[3]), q(p[4]), q(p[5])))
 
-        users_path = os.path.join(DATA_DIR, 'users.txt')
-        if os.path.exists(users_path):
-            with open(users_path, 'r', encoding='utf-8') as txtfile:
-                for line in txtfile:
-                    line = line.strip()
-                    if not line: continue
-                    parts = line.split('|')
-                    if len(parts) >= 6:
-                        user_id, name, email, gender, reg_date, occupation = parts[:6]
-                        f.write(f"INSERT INTO users (id, name, email, gender, register_date, occupation) VALUES ({user_id}, '{escape_sql(name)}', '{escape_sql(email)}', '{escape_sql(gender)}', '{escape_sql(reg_date)}', '{escape_sql(occupation)}');\n")
+    w("COMMIT;")
 
-    print(f"Скрипт {SQL_SCRIPT_NAME} успешно создан.")
+    with open(OUT_FILE, "w", encoding="utf-8", newline="\n") as out:
+        out.write("\n".join(lines) + "\n")
+    print("Файл успешно создан.")
 
-def execute_sql_script():
-    
-    if os.path.exists(DB_NAME):
-        os.remove(DB_NAME)
 
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    with open(SQL_SCRIPT_NAME, 'r', encoding='utf-8') as f:
-        sql_script = f.read()
-    
-    try:
-        cursor.executescript(sql_script)
-        conn.commit()
-    except sqlite3.Error as e:
-        print(f"Ошибка при выполнении SQL-скрипта: {e}")
-    finally:
-        conn.close()
-
-if __name__ == '__main__':
-    generate_sql_script()
-    execute_sql_script()
+if __name__ == "__main__":
+    main()
